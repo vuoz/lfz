@@ -45,6 +45,10 @@ enum Commands {
         /// Stream real-time build output for each target
         #[arg(short, long)]
         verbose: bool,
+
+        /// Incremental build (faster, but may have stale artifacts)
+        #[arg(short, long)]
+        incremental: bool,
     },
 
     /// Refresh west workspace (re-run west update)
@@ -75,7 +79,8 @@ fn main() -> Result<()> {
             jobs,
             quiet,
             verbose,
-        }) => cli::build::run(board, shield, output, jobs, quiet, verbose),
+            incremental,
+        }) => cli::build::run(board, shield, output, jobs, quiet, verbose, incremental),
 
         Some(Commands::Update) => cli::update::run(),
 
@@ -86,6 +91,14 @@ fn main() -> Result<()> {
         Some(Commands::Size) => cli::size::run(),
 
         // Default to build if no subcommand
-        None => cli::build::run(None, None, "zmk-target".to_string(), None, false, false),
+        None => cli::build::run(
+            None,
+            None,
+            "zmk-target".to_string(),
+            None,
+            false,
+            false,
+            false,
+        ),
     }
 }

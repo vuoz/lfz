@@ -42,6 +42,7 @@ pub struct BuildOrchestrator {
     output_dir: PathBuf,
     quiet: bool,
     verbose: bool,
+    pristine: bool,
 }
 
 impl BuildOrchestrator {
@@ -52,6 +53,7 @@ impl BuildOrchestrator {
         output_dir: PathBuf,
         quiet: bool,
         verbose: bool,
+        pristine: bool,
     ) -> Self {
         Self {
             runtime,
@@ -60,6 +62,7 @@ impl BuildOrchestrator {
             output_dir,
             quiet,
             verbose,
+            pristine,
         }
     }
 
@@ -109,6 +112,7 @@ impl BuildOrchestrator {
             let extra_modules = self.project.extra_modules();
             let output_dir = self.output_dir.clone();
             let quiet = self.quiet;
+            let pristine = self.pristine;
             let results = Arc::clone(&results);
             let semaphore = Arc::clone(&semaphore);
 
@@ -124,6 +128,7 @@ impl BuildOrchestrator {
                     &output_dir,
                     &target,
                     quiet,
+                    pristine,
                 );
 
                 let mut results = results.lock().unwrap();
@@ -178,6 +183,7 @@ impl BuildOrchestrator {
             let project_config_dir = self.project.config_dir.clone();
             let extra_modules = self.project.extra_modules();
             let output_dir = self.output_dir.clone();
+            let pristine = self.pristine;
             let results = Arc::clone(&results);
             let semaphore = Arc::clone(&semaphore);
 
@@ -193,6 +199,7 @@ impl BuildOrchestrator {
                     &output_dir,
                     &target,
                     &color,
+                    pristine,
                 );
 
                 let mut results = results.lock().unwrap();
@@ -225,6 +232,7 @@ impl BuildOrchestrator {
             &self.output_dir,
             target,
             self.quiet,
+            self.pristine,
         )
     }
 
@@ -237,6 +245,7 @@ impl BuildOrchestrator {
             &self.project.extra_modules(),
             &self.output_dir,
             target,
+            self.pristine,
         )
     }
 
@@ -249,6 +258,7 @@ impl BuildOrchestrator {
         output_dir: &PathBuf,
         target: &BuildTarget,
         quiet: bool,
+        pristine: bool,
     ) -> BuildResult {
         let start = Instant::now();
         let target_name = target.artifact_name.clone();
@@ -258,7 +268,7 @@ impl BuildOrchestrator {
         }
 
         // Build the west build command
-        let west_args = target.west_build_args("/workspace/config");
+        let west_args = target.west_build_args("/workspace/config", pristine);
         let west_cmd = format!("west {}", west_args.join(" "));
 
         // Get ccache dir
@@ -513,6 +523,7 @@ impl BuildOrchestrator {
         output_dir: &PathBuf,
         target: &BuildTarget,
         color: &str,
+        pristine: bool,
     ) -> BuildResult {
         let start = Instant::now();
         let target_name = target.artifact_name.clone();
@@ -520,7 +531,7 @@ impl BuildOrchestrator {
         output::verbose_start(&target_name, color);
 
         // Build the west build command
-        let west_args = target.west_build_args("/workspace/config");
+        let west_args = target.west_build_args("/workspace/config", pristine);
         let west_cmd = format!("west {}", west_args.join(" "));
 
         // Get ccache dir
@@ -703,6 +714,7 @@ impl BuildOrchestrator {
         extra_modules: &[PathBuf],
         output_dir: &PathBuf,
         target: &BuildTarget,
+        pristine: bool,
     ) -> BuildResult {
         let start = Instant::now();
         let target_name = target.artifact_name.clone();
@@ -711,7 +723,7 @@ impl BuildOrchestrator {
         output::verbose_header(&target_name);
 
         // Build the west build command
-        let west_args = target.west_build_args("/workspace/config");
+        let west_args = target.west_build_args("/workspace/config", pristine);
         let west_cmd = format!("west {}", west_args.join(" "));
 
         output::command(&west_cmd);

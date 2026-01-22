@@ -78,7 +78,7 @@ impl BuildTarget {
     }
 
     /// Generate the west build command arguments
-    pub fn west_build_args(&self, config_path: &str) -> Vec<String> {
+    pub fn west_build_args(&self, config_path: &str, pristine: bool) -> Vec<String> {
         let mut args = vec![
             "build".to_string(),
             "-s".to_string(),
@@ -87,8 +87,12 @@ impl BuildTarget {
             self.build_dir.clone(),
             "-b".to_string(),
             self.board.clone(),
-            "-p".to_string(), // Pristine build
         ];
+
+        // Add pristine flag only if requested (clean rebuild)
+        if pristine {
+            args.push("-p".to_string());
+        }
 
         // Add snippets if present (must be before -- separator)
         // Snippets can be space-separated, each needs its own -S flag
@@ -148,12 +152,12 @@ mod tests {
     }
 
     #[test]
-    fn test_west_build_args() {
+    fn test_west_build_args_incremental() {
         let target =
             BuildTarget::from_args("nice_nano_v2".to_string(), Some("corne_left".to_string()))
                 .unwrap();
 
-        let args = target.west_build_args("/workspace/config");
+        let args = target.west_build_args("/workspace/config", false);
 
         assert!(args.contains(&"build".to_string()));
         assert!(args.contains(&"-s".to_string()));
@@ -162,6 +166,18 @@ mod tests {
         assert!(args.contains(&"nice_nano_v2".to_string()));
         assert!(args.contains(&"-DSHIELD=corne_left".to_string()));
         assert!(args.iter().any(|a| a.contains("-DZMK_CONFIG=")));
+        assert!(!args.contains(&"-p".to_string())); // No pristine flag for incremental
+    }
+
+    #[test]
+    fn test_west_build_args_pristine() {
+        let target =
+            BuildTarget::from_args("nice_nano_v2".to_string(), Some("corne_left".to_string()))
+                .unwrap();
+
+        let args = target.west_build_args("/workspace/config", true);
+
+        assert!(args.contains(&"-p".to_string())); // Pristine flag present
     }
 
     #[test]
@@ -175,7 +191,7 @@ mod tests {
         };
 
         let target = BuildTarget::from_include(&include).unwrap();
-        let args = target.west_build_args("/workspace/config");
+        let args = target.west_build_args("/workspace/config", false);
 
         // Snippets should be -S flags before --
         let separator_pos = args.iter().position(|a| a == "--").unwrap();

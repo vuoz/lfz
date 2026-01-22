@@ -17,6 +17,7 @@ pub fn run(
     jobs: Option<usize>,
     quiet: bool,
     verbose: bool,
+    incremental: bool,
 ) -> Result<()> {
     // 1. Detect project structure
     let project = Project::detect()?;
@@ -71,8 +72,11 @@ pub fn run(
 
     // 5. Run builds
     let output_dir = PathBuf::from(&output_path);
-    let orchestrator =
-        BuildOrchestrator::new(runtime, workspace, project, output_dir, quiet, verbose);
+    // Pristine is the default (safe), incremental is opt-in (fast but may have stale artifacts)
+    let pristine = !incremental;
+    let orchestrator = BuildOrchestrator::new(
+        runtime, workspace, project, output_dir, quiet, verbose, pristine,
+    );
 
     let build_start = Instant::now();
     let results = if num_jobs == 1 {
