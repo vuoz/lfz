@@ -26,24 +26,7 @@ pub fn collect_artifact(
 
     // Check if source exists
     if !source.exists() {
-        // Try .hex as fallback (some boards produce .hex instead of .uf2)
-        let hex_source = workspace.join(format!("{}/zephyr/zmk.hex", target.build_dir));
-        if hex_source.exists() {
-            let hex_dest = output_dir.join(format!("{}.hex", target.artifact_name));
-            fs::copy(&hex_source, &hex_dest).with_context(|| {
-                format!(
-                    "Failed to copy {} to {}",
-                    hex_source.display(),
-                    hex_dest.display()
-                )
-            })?;
-            return Ok(hex_dest);
-        }
-
-        anyhow::bail!(
-            "Build artifact not found at {} or .hex equivalent",
-            source.display()
-        );
+        anyhow::bail!("Build artifact not found at {}", source.display());
     }
 
     // Copy the artifact
