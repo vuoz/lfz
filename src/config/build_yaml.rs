@@ -37,6 +37,10 @@ pub struct BuildInclude {
 
     #[serde(rename = "artifact-name")]
     pub artifact_name: Option<String>,
+
+    /// Optional group for filtering (e.g., "central", "peripheral")
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 impl BuildConfig {
@@ -81,6 +85,18 @@ impl BuildConfig {
         }
 
         Ok(targets)
+    }
+
+    /// Get list of unique groups defined in the config
+    pub fn available_groups(&self) -> Vec<String> {
+        let mut groups: Vec<String> = self
+            .include
+            .iter()
+            .filter_map(|inc| inc.group.clone())
+            .collect();
+        groups.sort();
+        groups.dedup();
+        groups
     }
 }
 
@@ -141,5 +157,45 @@ shield:
         assert_eq!(targets.len(), 2);
         assert_eq!(targets[0].artifact_name, "corne_left-nice_nano_v2");
         assert_eq!(targets[1].artifact_name, "corne_right-nice_nano_v2");
+    }
+
+    #[test]
+    fn test_parse_include_with_group() {
+        let yaml = r#"
+include:
+  - board: nice_nano_v2
+    shield: corne_left
+    group: central
+  - board: nice_nano_v2
+    shield: corne_right
+    group: peripheral
+"#;
+        let config: BuildConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.include.len(), 2);
+        assert_eq!(config.include[0].group, Some("central".to_string()));
+        assert_eq!(config.include[1].group, Some("peripheral".to_string()));
+
+        let targets = config.expand_targets().unwrap();
+        assert_eq!(targets[0].group, Some("central".to_string()));
+        assert_eq!(targets[1].group, Some("peripheral".to_string()));
+    }
+
+    #[test]
+    fn test_available_groups() {
+        let yaml = r#"
+include:
+  - board: nice_nano_v2
+    shield: corne_left
+    group: central
+  - board: nice_nano_v2
+    shield: corne_right
+    group: peripheral
+  - board: nice_nano_v2
+    shield: corne_dongle
+    group: central
+"#;
+        let config: BuildConfig = serde_yaml::from_str(yaml).unwrap();
+        let groups = config.available_groups();
+        assert_eq!(groups, vec!["central", "peripheral"]);
     }
 }

@@ -10,6 +10,7 @@ use crate::container::Runtime;
 use crate::output;
 use crate::workspace::WorkspaceManager;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     board: Option<String>,
     shield: Option<String>,
@@ -18,6 +19,7 @@ pub fn run(
     quiet: bool,
     verbose: bool,
     incremental: bool,
+    group: String,
 ) -> Result<()> {
     // 1. Detect project structure
     let project = Project::detect()?;
@@ -35,32 +37,43 @@ pub fn run(
 
     // 4. Determine build targets
     let targets = if let Some(board) = board {
-        // Single target from CLI args
+        // Single target from CLI args (ignore group filter)
         vec![BuildTarget::from_args(board, shield)?]
     } else {
         // Parse build.yaml (path already detected by Project)
         let build_config = BuildConfig::load(&project.build_yaml)?;
-        build_config.expand_targets()?
+        let all_targets = build_config.expand_targets()?;
+
+        // Filter by group if specified (and not "all")
+        if group == "all" {
+            all_targets
+        } else {
+            let filtered: Vec<_> = all_targets
+                .into_iter()
+                .filter(|t| t.group.as_deref() == Some(group.as_str()))
+                .collect();
+
+            if filtered.is_empty() {
+                anyhow::bail!(
+                    "No targets found in group '{}'. Available groups: {}",
+                    group,
+                    build_config.available_groups().join(", ")
+                );
+            }
+            filtered
+        }
     };
 
     // Determine parallelism: -j1 = sequential, -jN = N parallel, default = all parallel
-    // Verbose mode forces sequential builds for readable output
-    let num_jobs = if verbose {
-        1 // Verbose mode requires sequential for readable streaming output
-    } else {
-        jobs.unwrap_or(targets.len()).max(1)
-    };
+    let num_jobs = jobs.unwrap_or(targets.len()).max(1);
 
     if verbose {
         output::header(&format!(
             "Building {} target(s) with verbose output",
             targets.len()
         ));
-    } else if num_jobs == 1 {
-        output::header(&format!(
-            "Building {} target(s) sequentially",
-            targets.len()
-        ));
+    } else if num_jobs == 1 || targets.len() == 1 {
+        output::header(&format!("Building {} target(s)", targets.len()));
     } else if num_jobs >= targets.len() {
         output::header(&format!("Building {} target(s)", targets.len()));
     } else {
@@ -80,7 +93,9 @@ pub fn run(
     );
 
     let build_start = Instant::now();
-    let results = if num_jobs == 1 {
+    // Always use parallel build path (with progress bars) unless verbose mode
+    // Verbose mode streams full output, so needs sequential handling
+    let results = if verbose {
         orchestrator.build_sequential(&targets)?
     } else {
         orchestrator.build_parallel(&targets, num_jobs)?

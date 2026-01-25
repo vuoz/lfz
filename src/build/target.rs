@@ -22,6 +22,9 @@ pub struct BuildTarget {
 
     /// Build directory relative to workspace (e.g., "build/corne_left-nice_nano_v2")
     pub build_dir: String,
+
+    /// Optional group for filtering (e.g., "central", "peripheral")
+    pub group: Option<String>,
 }
 
 impl BuildTarget {
@@ -37,6 +40,7 @@ impl BuildTarget {
             snippet: None,
             artifact_name,
             build_dir,
+            group: None,
         })
     }
 
@@ -66,6 +70,7 @@ impl BuildTarget {
             snippet: include.snippet.clone(),
             artifact_name,
             build_dir,
+            group: include.group.clone(),
         })
     }
 
@@ -188,6 +193,7 @@ mod tests {
             cmake_args: None,
             snippet: Some("studio-rpc-usb-uart zmk-usb-logging".to_string()),
             artifact_name: None,
+            group: None,
         };
 
         let target = BuildTarget::from_include(&include).unwrap();
@@ -224,6 +230,7 @@ mod tests {
             cmake_args: Some("-DCONFIG_ZMK_SPLIT=y -DCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n".to_string()),
             snippet: None,
             artifact_name: None,
+            group: None,
         };
 
         let target = BuildTarget::from_include(&include).unwrap();
