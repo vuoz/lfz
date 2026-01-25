@@ -10,8 +10,12 @@ Use at your own risk
 
 
 ### Install 
+
+#### Locally 
 1. Clone this repo
 2. `cargo install --path .`
+
+#### Or install from tags.
 
 
 ### Usage
