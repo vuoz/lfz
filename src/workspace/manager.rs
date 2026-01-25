@@ -130,7 +130,7 @@ done
 echo "Workspace initialized successfully"
 "#;
 
-        let mut cmd = ContainerCommand::new(runtime.clone(), DEFAULT_IMAGE)
+        let mut cmd = ContainerCommand::new(*runtime, DEFAULT_IMAGE)
             .mount(workspace, "/workspace", false)
             .mount(&project.config_dir, "/workspace/config", true)
             .mount(&self.ccache_dir, "/root/.ccache", false)
@@ -225,6 +225,7 @@ echo "Workspace initialized successfully"
     }
 
     /// Get the ccache directory path
+    #[allow(dead_code)]
     pub fn ccache_dir(&self) -> &PathBuf {
         &self.ccache_dir
     }

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Represents a detected ZMK keyboard project
 #[derive(Debug)]
@@ -11,14 +11,8 @@ pub struct Project {
     /// Path to the config directory (contains west.yml, keymaps, etc.)
     pub config_dir: PathBuf,
 
-    /// Optional path to boards directory at root level
-    pub boards_dir: Option<PathBuf>,
-
     /// Path to build.yaml or build.yml (in root directory)
     pub build_yaml: PathBuf,
-
-    /// Path to west.yml (in config directory)
-    pub west_yml: PathBuf,
 
     /// Whether the project root is a valid Zephyr module (has zephyr/module.yml)
     pub is_zephyr_module: bool,
@@ -32,7 +26,7 @@ impl Project {
     }
 
     /// Detect project structure from a given directory
-    pub fn detect_from(root: &PathBuf) -> Result<Self> {
+    pub fn detect_from(root: &Path) -> Result<Self> {
         let config_dir = root.join("config");
 
         // Verify config directory exists
@@ -69,30 +63,15 @@ impl Project {
             );
         }
 
-        // Check for optional boards directory at root level
-        let boards_dir = root.join("boards");
-        let boards_dir = if boards_dir.is_dir() {
-            Some(boards_dir)
-        } else {
-            None
-        };
-
         // Check if project root is a valid Zephyr module (has zephyr/module.yml)
         let is_zephyr_module = root.join("zephyr").join("module.yml").is_file();
 
         Ok(Self {
-            root: root.clone(),
+            root: root.to_path_buf(),
             config_dir,
-            boards_dir,
             build_yaml,
-            west_yml,
             is_zephyr_module,
         })
-    }
-
-    /// Check if there's a boards directory (either at root or in config)
-    pub fn has_custom_boards(&self) -> bool {
-        self.boards_dir.is_some() || self.config_dir.join("boards").is_dir()
     }
 
     /// Get Zephyr extra modules that need to be mounted
@@ -130,7 +109,7 @@ mod tests {
         let project = Project::detect_from(&root.to_path_buf()).unwrap();
         assert_eq!(project.config_dir, config_dir);
         assert_eq!(project.build_yaml, root.join("build.yaml"));
-        assert!(project.boards_dir.is_none());
+        assert!(!project.is_zephyr_module);
     }
 
     #[test]
@@ -148,7 +127,9 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_with_boards() {
+    fn test_detect_with_boards_no_module() {
+        // Having a boards/ directory alone (without zephyr/module.yml) does NOT
+        // make it a Zephyr module. This is an important distinction.
         let dir = tempdir().unwrap();
         let root = dir.path();
         let config_dir = root.join("config");
@@ -159,8 +140,7 @@ mod tests {
         fs::write(config_dir.join("west.yml"), "manifest:\n  projects: []").unwrap();
 
         let project = Project::detect_from(&root.to_path_buf()).unwrap();
-        assert_eq!(project.boards_dir, Some(boards_dir));
-        // boards/ alone is not a Zephyr module
+        // boards/ alone is not a Zephyr module - need zephyr/module.yml
         assert!(!project.is_zephyr_module);
         assert!(project.extra_modules().is_empty());
     }

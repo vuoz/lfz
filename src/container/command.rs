@@ -4,6 +4,7 @@ use std::process::Command;
 use super::Runtime;
 
 /// Builder for container run commands
+#[allow(dead_code)]
 pub struct ContainerCommand {
     runtime: Runtime,
     image: String,
@@ -20,6 +21,7 @@ struct Mount {
     readonly: bool,
 }
 
+#[allow(dead_code)]
 impl ContainerCommand {
     pub fn new(runtime: Runtime, image: impl Into<String>) -> Self {
         Self {
@@ -118,7 +120,7 @@ impl ContainerCommand {
     }
 
     /// Get the command as a string (for debugging/display)
-    pub fn to_string(&self) -> String {
+    pub fn as_string(&self) -> String {
         let mut parts = vec![self.runtime.command_name().to_string(), "run".to_string()];
 
         if self.remove {
@@ -165,7 +167,7 @@ mod tests {
             .env("FOO", "bar")
             .shell_command("echo hello");
 
-        let s = cmd.to_string();
+        let s = cmd.as_string();
         assert!(s.contains("docker run"));
         assert!(s.contains("--rm"));
         assert!(s.contains("-v /host/path:/container/path"));

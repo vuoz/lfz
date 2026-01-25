@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -22,17 +22,6 @@ pub struct BuildResult {
     pub error: Option<String>,
     pub error_output: Option<String>,
     pub artifact_path: Option<PathBuf>,
-    pub duration: Option<Duration>,
-}
-
-/// Helper to create a failed BuildResult
-fn failed_result(target_name: String, error: String) -> BuildResult {
-    BuildResult {
-        target_name,
-        success: false,
-        error: Some(error),
-        ..Default::default()
-    }
 }
 
 /// Orchestrates building multiple targets
@@ -256,12 +245,13 @@ impl BuildOrchestrator {
     }
 
     /// Inner build function - quiet during build, only prints final result
+    #[allow(clippy::too_many_arguments)]
     fn build_target_inner(
         runtime: &Runtime,
-        workspace: &PathBuf,
-        config_dir: &PathBuf,
+        workspace: &Path,
+        config_dir: &Path,
         extra_modules: &[PathBuf],
-        output_dir: &PathBuf,
+        output_dir: &Path,
         target: &BuildTarget,
         quiet: bool,
         pristine: bool,
@@ -286,7 +276,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to get ccache dir: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -339,7 +328,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to spawn build process: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -380,7 +368,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to wait for build: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -412,7 +399,6 @@ impl BuildOrchestrator {
                     Some(combined_output)
                 },
                 artifact_path: None,
-                duration: Some(duration),
             };
         }
 
@@ -437,7 +423,6 @@ impl BuildOrchestrator {
                     error: None,
                     error_output: None,
                     artifact_path: Some(artifact_path),
-                    duration: Some(duration),
                 }
             }
             Err(e) => {
@@ -450,19 +435,19 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to collect artifact: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: Some(duration),
                 }
             }
         }
     }
 
     /// Build a target with progress bar updates (for parallel non-verbose mode)
+    #[allow(clippy::too_many_arguments)]
     fn build_target_with_progress(
         runtime: &Runtime,
-        workspace: &PathBuf,
-        config_dir: &PathBuf,
+        workspace: &Path,
+        config_dir: &Path,
         extra_modules: &[PathBuf],
-        output_dir: &PathBuf,
+        output_dir: &Path,
         target: &BuildTarget,
         pristine: bool,
         progress: Option<(&BuildProgress, usize)>,
@@ -493,7 +478,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to get ccache dir: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -546,7 +530,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to spawn build process: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -623,7 +606,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to wait for build: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -658,7 +640,6 @@ impl BuildOrchestrator {
                     Some(combined_output)
                 },
                 artifact_path: None,
-                duration: Some(duration),
             };
         }
 
@@ -681,7 +662,6 @@ impl BuildOrchestrator {
                     error: None,
                     error_output: None,
                     artifact_path: Some(artifact_path),
-                    duration: Some(duration),
                 }
             }
             Err(e) => {
@@ -694,19 +674,19 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to collect artifact: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: Some(duration),
                 }
             }
         }
     }
 
     /// Build with verbose streaming output and colored prefix (for parallel verbose mode)
+    #[allow(clippy::too_many_arguments)]
     fn build_target_verbose_parallel(
         runtime: &Runtime,
-        workspace: &PathBuf,
-        config_dir: &PathBuf,
+        workspace: &Path,
+        config_dir: &Path,
         extra_modules: &[PathBuf],
-        output_dir: &PathBuf,
+        output_dir: &Path,
         target: &BuildTarget,
         color_index: usize,
         pristine: bool,
@@ -735,7 +715,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to get ccache dir: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -790,7 +769,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to spawn build process: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -833,7 +811,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to wait for build: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: Some(duration),
                 };
             }
         };
@@ -848,7 +825,6 @@ impl BuildOrchestrator {
                 error: Some(format!("Build failed with exit code: {:?}", status.code())),
                 error_output: None,
                 artifact_path: None,
-                duration: Some(duration),
             };
         }
 
@@ -868,7 +844,6 @@ impl BuildOrchestrator {
                     error: None,
                     error_output: None,
                     artifact_path: Some(artifact_path),
-                    duration: Some(duration),
                 }
             }
             Err(e) => {
@@ -884,19 +859,19 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to collect artifact: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: Some(duration),
                 }
             }
         }
     }
 
     /// Build with verbose streaming output - shows all build output in real-time (sequential)
+    #[allow(clippy::too_many_arguments)]
     fn build_target_verbose_inner(
         runtime: &Runtime,
-        workspace: &PathBuf,
-        config_dir: &PathBuf,
+        workspace: &Path,
+        config_dir: &Path,
         extra_modules: &[PathBuf],
-        output_dir: &PathBuf,
+        output_dir: &Path,
         target: &BuildTarget,
         pristine: bool,
     ) -> BuildResult {
@@ -924,7 +899,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to get ccache dir: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -975,7 +949,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to run build: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: None,
                 };
             }
         };
@@ -992,7 +965,6 @@ impl BuildOrchestrator {
                 error: Some(format!("Build failed with exit code: {:?}", status.code())),
                 error_output: None,
                 artifact_path: None,
-                duration: Some(duration),
             };
         }
 
@@ -1006,7 +978,6 @@ impl BuildOrchestrator {
                     error: None,
                     error_output: None,
                     artifact_path: Some(artifact_path),
-                    duration: Some(duration),
                 }
             }
             Err(e) => {
@@ -1017,7 +988,6 @@ impl BuildOrchestrator {
                     error: Some(format!("Failed to collect artifact: {}", e)),
                     error_output: None,
                     artifact_path: None,
-                    duration: Some(duration),
                 }
             }
         }

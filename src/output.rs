@@ -1,8 +1,8 @@
 //! Terminal output utilities using indicatif and console
 
-use console::{style, Style, Term};
+use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// Create a spinner for long-running operations
@@ -21,6 +21,7 @@ pub fn spinner(message: &str) -> ProgressBar {
 
 /// Build progress tracker for parallel builds using indicatif MultiProgress
 pub struct BuildProgress {
+    #[allow(dead_code)]
     multi: MultiProgress,
     bars: Vec<ProgressBar>,
     targets: Vec<String>,
@@ -65,7 +66,6 @@ impl BuildProgress {
         if let Some(pb) = self.bars.get(index) {
             let target = self.targets.get(index).map(|s| s.as_str()).unwrap_or("");
             let prefix = match state {
-                BuildState::Pending => format!("{}", style("[  ]").dim()),
                 BuildState::Starting => format!("{}", style("[..]").cyan()),
                 BuildState::Running => format!("{}", style("[>>]").blue()),
                 BuildState::Success => format!("{}", style("[OK]").green().bold()),
@@ -146,6 +146,7 @@ impl BuildProgress {
     }
 
     /// Finish all progress bars (call when done)
+    #[allow(dead_code)]
     pub fn finish_all(&self) {
         for pb in &self.bars {
             if !pb.is_finished() {
@@ -157,7 +158,6 @@ impl BuildProgress {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildState {
-    Pending,
     Starting,
     Running,
     Success,
@@ -182,6 +182,7 @@ pub fn success(message: &str) {
 }
 
 /// Print a warning message (yellow)
+#[allow(dead_code)]
 pub fn warning(message: &str) {
     println!("{} {}", style("warning:").yellow(), message);
 }
@@ -202,6 +203,7 @@ pub fn list_item(item: &str) {
 }
 
 /// Print a key-value pair
+#[allow(dead_code)]
 pub fn kv(key: &str, value: &str) {
     println!("  {} {}", style(format!("{}:", key)).dim(), value);
 }
@@ -369,28 +371,9 @@ pub fn verbose_done(
     }
 }
 
-// === Legacy compatibility functions ===
-// These maintain the old API while using console internally
-
-/// Initialize the build progress display with target names (legacy - now no-op, use BuildProgress)
-pub fn init_build_progress(_targets: &[String]) {
-    // No-op - use BuildProgress::new() instead
-}
-
-/// Update a specific target's build status (legacy - now prints simple line)
-pub fn update_build_status(target: &str, state: BuildState, progress: &str) {
-    build_status(target, state, progress);
-}
-
-/// Finish the build progress display (legacy - now no-op)
-pub fn finish_build_progress() {
-    // No-op - use BuildProgress methods instead
-}
-
 /// Print a build target status (simple, non-updating version)
 pub fn build_status(target: &str, state: BuildState, message: &str) {
     let (symbol, color_fn): (&str, fn(String) -> console::StyledObject<String>) = match state {
-        BuildState::Pending => ("  ", |s| style(s).dim()),
         BuildState::Starting => ("..", |s| style(s).cyan()),
         BuildState::Running => (">>", |s| style(s).blue()),
         BuildState::Success => ("OK", |s| style(s).green()),
@@ -403,9 +386,4 @@ pub fn build_status(target: &str, state: BuildState, message: &str) {
     } else {
         println!("{} {} {}", prefix, target, style(message).dim());
     }
-}
-
-// Re-export for compatibility
-pub fn target_color(index: usize) -> usize {
-    index
 }

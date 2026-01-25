@@ -5,6 +5,8 @@ edition = "2021"
 description = "Local First ZMK - Build ZMK firmware locally with ease"
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/schmidtw/lfz"
+homepage = "https://github.com/schmidtw/lfz"
 
 [dependencies]
 # CLI
@@ -37,3 +39,27 @@ console = "0.15"
 
 [dev-dependencies]
 tempfile = "3"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# CI backends to generate
+ci = "github"
+# Target platforms
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
+]
+# Don't generate shell installer scripts (user preference)
+installers = []
+# Create GitHub Release
+create-release = true
+# Build artifacts for GitHub releases
+github-releases = true

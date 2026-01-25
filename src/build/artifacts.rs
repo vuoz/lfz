@@ -11,7 +11,7 @@ pub fn collect_artifact(
     output_dir: &Path,
 ) -> Result<PathBuf> {
     // Source path in workspace
-    let source = workspace.join(&target.firmware_path());
+    let source = workspace.join(target.firmware_path());
 
     // Ensure output directory exists
     fs::create_dir_all(output_dir).with_context(|| {
@@ -34,26 +34,6 @@ pub fn collect_artifact(
         .with_context(|| format!("Failed to copy {} to {}", source.display(), dest.display()))?;
 
     Ok(dest)
-}
-
-/// Find all firmware files in a build directory
-pub fn find_firmware_files(build_dir: &Path) -> Vec<PathBuf> {
-    let zephyr_dir = build_dir.join("zephyr");
-    if !zephyr_dir.exists() {
-        return Vec::new();
-    }
-
-    let mut files = Vec::new();
-
-    // Look for common firmware file types
-    for ext in &["uf2", "hex", "bin"] {
-        let firmware = zephyr_dir.join(format!("zmk.{}", ext));
-        if firmware.exists() {
-            files.push(firmware);
-        }
-    }
-
-    files
 }
 
 #[cfg(test)]
