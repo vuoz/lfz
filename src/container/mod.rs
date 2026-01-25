@@ -36,13 +36,35 @@ impl Runtime {
         )
     }
 
-    /// Check if a runtime is available
+    /// Check if a runtime is available (command exists)
     fn is_available(name: &str) -> bool {
         Command::new(name)
             .arg("--version")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
+    }
+
+    /// Check if the runtime daemon is running and responsive
+    pub fn is_running(&self) -> bool {
+        self.command()
+            .args(["info"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Ensure the runtime is available and running
+    pub fn ensure_running(&self) -> Result<()> {
+        if !self.is_running() {
+            anyhow::bail!(
+                "{} is installed but not running.\n\
+                 Please start {} and try again.",
+                self.name(),
+                self.name()
+            );
+        }
+        Ok(())
     }
 
     /// Get the command name for this runtime

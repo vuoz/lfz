@@ -1,4 +1,5 @@
 use anyhow::Result;
+
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -10,7 +11,7 @@ use super::artifacts::collect_artifact;
 use super::target::BuildTarget;
 use crate::config::project::Project;
 use crate::container::{ContainerCommand, Runtime, DEFAULT_IMAGE};
-use crate::output::{self, BuildState};
+use crate::output::{self, BuildProgress, BuildState};
 use crate::paths;
 
 /// Result of a single build
@@ -93,42 +94,50 @@ impl BuildOrchestrator {
             return self.build_parallel_verbose(targets, max_jobs);
         }
 
-        // Initialize the progress display with all target names
+        // Hide cursor during progress display
+        let term = console::Term::stderr();
         if !self.quiet {
+            let _ = term.hide_cursor();
+        }
+
+        // Initialize the progress display with all target names
+        let progress = if !self.quiet {
             let target_names: Vec<String> =
                 targets.iter().map(|t| t.artifact_name.clone()).collect();
-            output::init_build_progress(&target_names);
-        }
+            Some(Arc::new(BuildProgress::new(&target_names)))
+        } else {
+            None
+        };
 
         let results = Arc::new(Mutex::new(Vec::new()));
         let semaphore = Arc::new(Semaphore::new(max_jobs));
         let mut handles = Vec::new();
 
-        for target in targets {
+        for (index, target) in targets.iter().enumerate() {
             let target = target.clone();
             let runtime = self.runtime;
             let workspace = self.workspace.clone();
             let project_config_dir = self.project.config_dir.clone();
             let extra_modules = self.project.extra_modules();
             let output_dir = self.output_dir.clone();
-            let quiet = self.quiet;
             let pristine = self.pristine;
             let results = Arc::clone(&results);
             let semaphore = Arc::clone(&semaphore);
+            let progress = progress.clone();
 
             let handle = thread::spawn(move || {
                 // Acquire semaphore permit (blocks if max_jobs already running)
                 let _permit = semaphore.acquire();
 
-                let result = Self::build_target_inner(
+                let result = Self::build_target_with_progress(
                     &runtime,
                     &workspace,
                     &project_config_dir,
                     &extra_modules,
                     &output_dir,
                     &target,
-                    quiet,
                     pristine,
+                    progress.as_ref().map(|p| (p.as_ref(), index)),
                 );
 
                 let mut results = results.lock().unwrap();
@@ -145,9 +154,14 @@ impl BuildOrchestrator {
             handle.join().expect("Build thread panicked");
         }
 
-        // Finish the progress display
+        // Print final results to stdout
+        if let Some(ref prog) = progress {
+            prog.print_results();
+        }
+
+        // Restore cursor
         if !self.quiet {
-            output::finish_build_progress();
+            let _ = term.show_cursor();
         }
 
         let results = Arc::try_unwrap(results)
@@ -168,16 +182,8 @@ impl BuildOrchestrator {
         let semaphore = Arc::new(Semaphore::new(max_jobs));
         let mut handles = Vec::new();
 
-        // Assign colors to targets
-        let target_colors: Vec<(&BuildTarget, &'static str)> = targets
-            .iter()
-            .enumerate()
-            .map(|(i, t)| (t, output::target_color(i)))
-            .collect();
-
-        for (target, color) in target_colors {
+        for (index, target) in targets.iter().enumerate() {
             let target = target.clone();
-            let color = color.to_string();
             let runtime = self.runtime;
             let workspace = self.workspace.clone();
             let project_config_dir = self.project.config_dir.clone();
@@ -198,7 +204,7 @@ impl BuildOrchestrator {
                     &extra_modules,
                     &output_dir,
                     &target,
-                    &color,
+                    index,
                     pristine,
                 );
 
@@ -249,7 +255,7 @@ impl BuildOrchestrator {
         )
     }
 
-    /// Inner build function that can be called from threads
+    /// Inner build function - quiet during build, only prints final result
     fn build_target_inner(
         runtime: &Runtime,
         workspace: &PathBuf,
@@ -263,10 +269,6 @@ impl BuildOrchestrator {
         let start = Instant::now();
         let target_name = target.artifact_name.clone();
 
-        if !quiet {
-            output::update_build_status(&target_name, BuildState::Starting, "configuring");
-        }
-
         // Build the west build command
         let west_args = target.west_build_args("/workspace/config", pristine);
         let west_cmd = format!("west {}", west_args.join(" "));
@@ -276,7 +278,7 @@ impl BuildOrchestrator {
             Ok(dir) => dir,
             Err(e) => {
                 if !quiet {
-                    output::update_build_status(&target_name, BuildState::Failed, "ccache error");
+                    output::build_status(&target_name, BuildState::Failed, "ccache error");
                 }
                 return BuildResult {
                     target_name,
@@ -290,8 +292,6 @@ impl BuildOrchestrator {
         };
 
         // Build container command
-        // Working directory is /workspace where .west directory exists
-        // CMAKE_PREFIX_PATH is needed for CMake to find Zephyr's package config
         let mut container_cmd = ContainerCommand::new(*runtime, DEFAULT_IMAGE)
             .mount(workspace, "/workspace", false)
             .mount(config_dir, "/workspace/config", true)
@@ -302,7 +302,214 @@ impl BuildOrchestrator {
                 "/workspace/zephyr/share/zephyr-package/cmake",
             );
 
-        // Mount extra Zephyr modules (e.g., project root if it has zephyr/module.yml)
+        // Mount extra Zephyr modules
+        for (i, module_path) in extra_modules.iter().enumerate() {
+            let container_path = format!("/workspace/module_{}", i);
+            container_cmd = container_cmd.mount(module_path, &container_path, true);
+        }
+
+        // Add ZMK_EXTRA_MODULES cmake arg if we have extra modules
+        let module_paths: Vec<String> = (0..extra_modules.len())
+            .map(|i| format!("/workspace/module_{}", i))
+            .collect();
+
+        let build_script = if module_paths.is_empty() {
+            west_cmd
+        } else {
+            let modules_arg = module_paths.join(";");
+            format!("{} -DZMK_EXTRA_MODULES=\"{}\"", west_cmd, modules_arg)
+        };
+
+        let mut cmd = container_cmd.shell_command(&build_script).build();
+
+        // Capture output silently
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        // Spawn the process
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                if !quiet {
+                    output::build_status(&target_name, BuildState::Failed, "spawn error");
+                }
+                return BuildResult {
+                    target_name,
+                    success: false,
+                    error: Some(format!("Failed to spawn build process: {}", e)),
+                    error_output: None,
+                    artifact_path: None,
+                    duration: None,
+                };
+            }
+        };
+
+        // Read stdout/stderr in background threads
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+        let stdout_handle = thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            let mut all_output = Vec::new();
+            for line in reader.lines().map_while(Result::ok) {
+                all_output.push(line);
+            }
+            all_output.join("\n")
+        });
+
+        let stderr_handle = thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            let mut error_output = String::new();
+            for line in reader.lines().map_while(Result::ok) {
+                error_output.push_str(&line);
+                error_output.push('\n');
+            }
+            error_output
+        });
+
+        // Wait for process to complete
+        let status = match child.wait() {
+            Ok(status) => status,
+            Err(e) => {
+                if !quiet {
+                    output::build_status(&target_name, BuildState::Failed, "wait error");
+                }
+                return BuildResult {
+                    target_name,
+                    success: false,
+                    error: Some(format!("Failed to wait for build: {}", e)),
+                    error_output: None,
+                    artifact_path: None,
+                    duration: None,
+                };
+            }
+        };
+
+        let stdout_output = stdout_handle.join().unwrap_or_default();
+        let stderr_output = stderr_handle.join().unwrap_or_default();
+        let duration = start.elapsed();
+
+        if !status.success() {
+            let mut combined_output = stdout_output;
+            if !stderr_output.is_empty() {
+                if !combined_output.is_empty() {
+                    combined_output.push('\n');
+                }
+                combined_output.push_str(&stderr_output);
+            }
+
+            if !quiet {
+                output::build_status(&target_name, BuildState::Failed, "error");
+            }
+
+            return BuildResult {
+                target_name,
+                success: false,
+                error: Some(format!("Build failed with exit code: {:?}", status.code())),
+                error_output: if combined_output.is_empty() {
+                    None
+                } else {
+                    Some(combined_output)
+                },
+                artifact_path: None,
+                duration: Some(duration),
+            };
+        }
+
+        // Collect artifact
+        match collect_artifact(workspace, target, output_dir) {
+            Ok(artifact_path) => {
+                if !quiet {
+                    let artifact_name = artifact_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    let time_str = output::format_duration(duration);
+                    output::build_status(
+                        &target_name,
+                        BuildState::Success,
+                        &format!("{} ({})", artifact_name, time_str),
+                    );
+                }
+                BuildResult {
+                    target_name,
+                    success: true,
+                    error: None,
+                    error_output: None,
+                    artifact_path: Some(artifact_path),
+                    duration: Some(duration),
+                }
+            }
+            Err(e) => {
+                if !quiet {
+                    output::build_status(&target_name, BuildState::Failed, "artifact error");
+                }
+                BuildResult {
+                    target_name,
+                    success: false,
+                    error: Some(format!("Failed to collect artifact: {}", e)),
+                    error_output: None,
+                    artifact_path: None,
+                    duration: Some(duration),
+                }
+            }
+        }
+    }
+
+    /// Build a target with progress bar updates (for parallel non-verbose mode)
+    fn build_target_with_progress(
+        runtime: &Runtime,
+        workspace: &PathBuf,
+        config_dir: &PathBuf,
+        extra_modules: &[PathBuf],
+        output_dir: &PathBuf,
+        target: &BuildTarget,
+        pristine: bool,
+        progress: Option<(&BuildProgress, usize)>,
+    ) -> BuildResult {
+        use std::sync::mpsc::{channel, TryRecvError};
+
+        let start = Instant::now();
+        let target_name = target.artifact_name.clone();
+
+        if let Some((prog, idx)) = progress {
+            prog.update(idx, BuildState::Starting, "configuring");
+        }
+
+        // Build the west build command
+        let west_args = target.west_build_args("/workspace/config", pristine);
+        let west_cmd = format!("west {}", west_args.join(" "));
+
+        // Get ccache dir
+        let ccache_dir = match paths::ccache_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                if let Some((prog, idx)) = progress {
+                    prog.finish(idx, false, None, None);
+                }
+                return BuildResult {
+                    target_name,
+                    success: false,
+                    error: Some(format!("Failed to get ccache dir: {}", e)),
+                    error_output: None,
+                    artifact_path: None,
+                    duration: None,
+                };
+            }
+        };
+
+        // Build container command
+        let mut container_cmd = ContainerCommand::new(*runtime, DEFAULT_IMAGE)
+            .mount(workspace, "/workspace", false)
+            .mount(config_dir, "/workspace/config", true)
+            .mount(&ccache_dir, "/root/.ccache", false)
+            .workdir("/workspace")
+            .env(
+                "CMAKE_PREFIX_PATH",
+                "/workspace/zephyr/share/zephyr-package/cmake",
+            );
+
+        // Mount extra Zephyr modules
         for (i, module_path) in extra_modules.iter().enumerate() {
             let container_path = format!("/workspace/module_{}", i);
             container_cmd = container_cmd.mount(module_path, &container_path, true);
@@ -330,8 +537,8 @@ impl BuildOrchestrator {
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(e) => {
-                if !quiet {
-                    output::update_build_status(&target_name, BuildState::Failed, "spawn error");
+                if let Some((prog, idx)) = progress {
+                    prog.finish(idx, false, None, None);
                 }
                 return BuildResult {
                     target_name,
@@ -344,65 +551,28 @@ impl BuildOrchestrator {
             }
         };
 
-        // Process stdout for progress updates
+        // Set up channels for progress updates
+        let (progress_tx, progress_rx) = channel::<String>();
+
         let stdout = child.stdout.take().expect("Failed to capture stdout");
         let stderr = child.stderr.take().expect("Failed to capture stderr");
 
-        let target_name_clone = target_name.clone();
-        let quiet_clone = quiet;
-
-        // Spawn thread to read stdout and show progress
+        // Spawn thread to read stdout, parse progress, and capture output
         let stdout_handle = thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            let mut last_percent: i32 = -1;
             let mut all_output: Vec<String> = Vec::new();
-            const MAX_LINES: usize = 100; // Keep last N lines for context
 
-            for line in reader.lines() {
-                let line = match line {
-                    Ok(l) => l,
-                    Err(_) => continue,
-                };
-
-                // Keep recent output for error context
+            for line in reader.lines().map_while(Result::ok) {
                 all_output.push(line.clone());
-                if all_output.len() > MAX_LINES {
-                    all_output.remove(0);
-                }
 
                 // Parse ninja progress like [123/456]
-                if let Some((current, total, phase)) = parse_build_progress(&line) {
-                    if !quiet_clone {
-                        // Show progress at milestones: 0%, 25%, 50%, 75%, and special phases
-                        let percent = if total > 0 {
-                            (current * 100 / total) as i32
-                        } else {
-                            0
-                        };
-
-                        let milestone = percent / 25 * 25; // Round down to nearest 25%
-
-                        if let Some(phase_name) = phase {
-                            // Always show phase changes (linking, generating)
-                            output::update_build_status(
-                                &target_name_clone,
-                                BuildState::Running,
-                                &phase_name,
-                            );
-                        } else if milestone > last_percent {
-                            // Show percentage milestones
-                            output::update_build_status(
-                                &target_name_clone,
-                                BuildState::Running,
-                                &format!("{}%", percent),
-                            );
-                            last_percent = milestone;
-                        }
-                    }
+                if let Some((current, total, _phase)) = parse_build_progress(&line) {
+                    // Send progress update as [current/total]
+                    let msg = format!("[{}/{}]", current, total);
+                    let _ = progress_tx.send(msg); // Ignore send errors
                 }
             }
 
-            // Return all captured output for potential error display
             all_output.join("\n")
         });
 
@@ -410,21 +580,42 @@ impl BuildOrchestrator {
         let stderr_handle = thread::spawn(move || {
             let reader = BufReader::new(stderr);
             let mut error_output = String::new();
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    error_output.push_str(&line);
-                    error_output.push('\n');
-                }
+            for line in reader.lines().map_while(Result::ok) {
+                error_output.push_str(&line);
+                error_output.push('\n');
             }
             error_output
         });
 
-        // Wait for process to complete
-        let status = match child.wait() {
+        // Poll for progress updates while waiting for process to complete
+        let status = loop {
+            // Process any pending progress updates
+            if let Some((prog, idx)) = progress {
+                loop {
+                    match progress_rx.try_recv() {
+                        Ok(msg) => prog.update(idx, BuildState::Running, &msg),
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => break,
+                    }
+                }
+            }
+
+            // Check if process is done
+            match child.try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => {
+                    // Process still running, sleep briefly
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => break Err(e),
+            }
+        };
+
+        let status = match status {
             Ok(status) => status,
             Err(e) => {
-                if !quiet {
-                    output::update_build_status(&target_name, BuildState::Failed, "wait error");
+                if let Some((prog, idx)) = progress {
+                    prog.finish(idx, false, None, None);
                 }
                 return BuildResult {
                     target_name,
@@ -438,19 +629,18 @@ impl BuildOrchestrator {
         };
 
         // Get output from threads
-        let stdout_errors = stdout_handle.join().unwrap_or_default();
+        let stdout_output = stdout_handle.join().unwrap_or_default();
         let stderr_output = stderr_handle.join().unwrap_or_default();
 
+        let duration = start.elapsed();
+
         if !status.success() {
-            if !quiet {
-                output::update_build_status(&target_name, BuildState::Failed, "error");
+            if let Some((prog, idx)) = progress {
+                prog.finish(idx, false, None, Some(duration));
             }
 
-            // Combine stdout errors and stderr for the error output
-            let mut combined_output = String::new();
-            if !stdout_errors.is_empty() {
-                combined_output.push_str(&stdout_errors);
-            }
+            // Combine stdout and stderr for the error output
+            let mut combined_output = stdout_output.clone();
             if !stderr_output.is_empty() {
                 if !combined_output.is_empty() {
                     combined_output.push('\n');
@@ -458,7 +648,6 @@ impl BuildOrchestrator {
                 combined_output.push_str(&stderr_output);
             }
 
-            let duration = start.elapsed();
             return BuildResult {
                 target_name,
                 success: false,
@@ -474,21 +663,18 @@ impl BuildOrchestrator {
         }
 
         // Collect artifact
-        let duration = start.elapsed();
         match collect_artifact(workspace, target, output_dir) {
             Ok(artifact_path) => {
-                if !quiet {
-                    let artifact_name = artifact_path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy();
-                    let time_str = output::format_duration(duration);
-                    output::update_build_status(
-                        &target_name,
-                        BuildState::Success,
-                        &format!("{} ({})", artifact_name, time_str),
-                    );
+                let artifact_name = artifact_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                if let Some((prog, idx)) = progress {
+                    prog.finish(idx, true, Some(&artifact_name), Some(duration));
                 }
+
                 BuildResult {
                     target_name,
                     success: true,
@@ -499,8 +685,8 @@ impl BuildOrchestrator {
                 }
             }
             Err(e) => {
-                if !quiet {
-                    output::update_build_status(&target_name, BuildState::Failed, "artifact error");
+                if let Some((prog, idx)) = progress {
+                    prog.finish(idx, false, None, Some(duration));
                 }
                 BuildResult {
                     target_name,
@@ -522,13 +708,13 @@ impl BuildOrchestrator {
         extra_modules: &[PathBuf],
         output_dir: &PathBuf,
         target: &BuildTarget,
-        color: &str,
+        color_index: usize,
         pristine: bool,
     ) -> BuildResult {
         let start = Instant::now();
         let target_name = target.artifact_name.clone();
 
-        output::verbose_start(&target_name, color);
+        output::verbose_start(&target_name, color_index);
 
         // Build the west build command
         let west_args = target.west_build_args("/workspace/config", pristine);
@@ -540,7 +726,7 @@ impl BuildOrchestrator {
             Err(e) => {
                 output::verbose_line(
                     &target_name,
-                    color,
+                    color_index,
                     &format!("error: Failed to get ccache dir: {}", e),
                 );
                 return BuildResult {
@@ -595,7 +781,7 @@ impl BuildOrchestrator {
             Err(e) => {
                 output::verbose_line(
                     &target_name,
-                    color,
+                    color_index,
                     &format!("error: Failed to spawn: {}", e),
                 );
                 return BuildResult {
@@ -614,14 +800,12 @@ impl BuildOrchestrator {
 
         let target_name_stdout = target_name.clone();
         let target_name_stderr = target_name.clone();
-        let color_stdout = color.to_string();
-        let color_stderr = color.to_string();
 
         // Stream stdout with prefix
         let stdout_handle = thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
-                output::verbose_line(&target_name_stdout, &color_stdout, &line);
+                output::verbose_line(&target_name_stdout, color_index, &line);
             }
         });
 
@@ -629,7 +813,7 @@ impl BuildOrchestrator {
         let stderr_handle = thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
-                output::verbose_line(&target_name_stderr, &color_stderr, &line);
+                output::verbose_line(&target_name_stderr, color_index, &line);
             }
         });
 
@@ -642,7 +826,7 @@ impl BuildOrchestrator {
             Ok(status) => status,
             Err(e) => {
                 let duration = start.elapsed();
-                output::verbose_done(&target_name, color, false, None, Some(duration));
+                output::verbose_done(&target_name, color_index, false, None, Some(duration));
                 return BuildResult {
                     target_name,
                     success: false,
@@ -657,7 +841,7 @@ impl BuildOrchestrator {
         let duration = start.elapsed();
 
         if !status.success() {
-            output::verbose_done(&target_name, color, false, None, Some(duration));
+            output::verbose_done(&target_name, color_index, false, None, Some(duration));
             return BuildResult {
                 target_name,
                 success: false,
@@ -673,7 +857,7 @@ impl BuildOrchestrator {
             Ok(artifact_path) => {
                 output::verbose_done(
                     &target_name,
-                    color,
+                    color_index,
                     true,
                     Some(&artifact_path),
                     Some(duration),
@@ -690,10 +874,10 @@ impl BuildOrchestrator {
             Err(e) => {
                 output::verbose_line(
                     &target_name,
-                    color,
+                    color_index,
                     &format!("error: Failed to collect artifact: {}", e),
                 );
-                output::verbose_done(&target_name, color, false, None, Some(duration));
+                output::verbose_done(&target_name, color_index, false, None, Some(duration));
                 BuildResult {
                     target_name,
                     success: false,

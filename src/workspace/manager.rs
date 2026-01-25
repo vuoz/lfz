@@ -33,9 +33,9 @@ impl WorkspaceManager {
         })
     }
 
-    /// Get the workspace path for a project (based on west.yml hash)
+    /// Get the workspace path for a project (based on git repo + branch)
     pub fn workspace_path(&self, project: &Project) -> Result<PathBuf> {
-        let hash = west_yml::hash_west_yml(&project.west_yml)?;
+        let hash = west_yml::hash_workspace_key(&project.config_dir)?;
         Ok(self.workspaces_dir.join(hash))
     }
 
@@ -107,16 +107,17 @@ impl WorkspaceManager {
 
         // Build the west init && west update command
         // We mount the config as read-only and let west clone everything into the workspace
+        // Use shallow clones (--depth 1) to save disk space and download time
         // Retry west update up to 3 times since network failures are common
         let init_script = r#"
 set -e
 echo "Initializing west workspace..."
 west init -l /workspace/config
 
-echo "Updating west modules (this may take a while)..."
+echo "Updating west modules with shallow clones..."
 max_retries=3
 retry_count=0
-until west update; do
+until west update --narrow --fetch-opt=--depth=1; do
     retry_count=$((retry_count + 1))
     if [ $retry_count -ge $max_retries ]; then
         echo "ERROR: west update failed after $max_retries attempts"
@@ -137,7 +138,7 @@ echo "Workspace initialized successfully"
             .shell_command(init_script)
             .build();
 
-        output::command("west init -l config && west update");
+        output::command("west init -l config && west update --narrow --depth=1");
         output::info("This may take several minutes on first run...");
 
         // Stream output so user can see progress
@@ -176,12 +177,15 @@ echo "Workspace initialized successfully"
             last_lines
         });
 
-        // Stream stderr
+        // Capture stderr (only print on error)
         let stderr_handle = std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             let mut error_output = String::new();
             for line in reader.lines().map_while(Result::ok) {
-                eprintln!("  {}", line);
+                // Only print actual errors, not duplicated progress
+                if line.contains("error:") || line.contains("ERROR") || line.contains("fatal:") {
+                    eprintln!("  {}", line);
+                }
                 error_output.push_str(&line);
                 error_output.push('\n');
             }

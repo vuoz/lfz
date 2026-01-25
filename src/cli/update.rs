@@ -10,9 +10,10 @@ pub fn run() -> Result<()> {
     let project = Project::detect()?;
     output::status("Project", &project.root.display().to_string());
 
-    // 2. Detect container runtime
+    // 2. Detect container runtime and ensure it's running
     let runtime = Runtime::detect()?;
     output::status("Runtime", runtime.name());
+    runtime.ensure_running()?;
 
     // 3. Get workspace manager
     let workspace_manager = WorkspaceManager::new()?;
