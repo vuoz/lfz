@@ -8,6 +8,7 @@ use crate::config::build_yaml::BuildConfig;
 use crate::config::project::Project;
 use crate::container::Runtime;
 use crate::output;
+use crate::paths;
 use crate::workspace::WorkspaceManager;
 
 #[allow(clippy::too_many_arguments)]
@@ -23,7 +24,7 @@ pub fn run(
 ) -> Result<()> {
     // 1. Detect project structure
     let project = Project::detect()?;
-    output::status("Project", &project.root.display().to_string());
+    output::status("Project", &paths::anonymize_path(&project.root));
 
     // 2. Detect container runtime and ensure it's running
     let runtime = Runtime::detect()?;
@@ -33,7 +34,7 @@ pub fn run(
     // 3. Get or create workspace
     let workspace_manager = WorkspaceManager::new()?;
     let workspace = workspace_manager.get_or_create(&project)?;
-    output::status("Workspace", &workspace.display().to_string());
+    output::status("Workspace", &paths::anonymize_path(&workspace));
 
     // 4. Determine build targets
     let targets = if let Some(board) = board {

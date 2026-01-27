@@ -1,6 +1,16 @@
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Anonymize a path by replacing the user's home directory with ~
+pub fn anonymize_path(path: &Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(stripped) = path.strip_prefix(&home) {
+            return format!("~/{}", stripped.display());
+        }
+    }
+    path.display().to_string()
+}
 
 /// Get the cache directory for lfz
 /// Uses platform-appropriate location:

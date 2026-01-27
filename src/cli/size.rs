@@ -55,7 +55,7 @@ pub fn run() -> Result<()> {
     let workspaces_dir = paths::workspaces_dir()?;
     let ccache_dir = paths::ccache_dir()?;
 
-    output::status("Cache", &cache_dir.display().to_string());
+    output::status("Cache", &paths::anonymize_path(&cache_dir));
     println!();
 
     // Workspaces

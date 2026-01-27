@@ -56,7 +56,7 @@ pub fn run(all: bool) -> Result<()> {
         if workspaces_dir.exists() {
             let spinner = output::spinner(&format!(
                 "Removing all cached workspaces: {}",
-                workspaces_dir.display()
+                paths::anonymize_path(&workspaces_dir)
             ));
             remove_dir_all(&workspaces_dir)?;
             spinner.finish_with_message("All cached workspaces removed.");
@@ -69,7 +69,10 @@ pub fn run(all: bool) -> Result<()> {
         let workspace_manager = WorkspaceManager::new()?;
 
         if let Some(workspace) = workspace_manager.find_workspace(&project)? {
-            let spinner = output::spinner(&format!("Removing workspace: {}", workspace.display()));
+            let spinner = output::spinner(&format!(
+                "Removing workspace: {}",
+                paths::anonymize_path(&workspace)
+            ));
             remove_dir_all(&workspace)?;
             spinner.finish_with_message("Workspace removed.");
         } else {
