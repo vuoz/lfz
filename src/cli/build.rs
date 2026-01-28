@@ -76,16 +76,14 @@ pub fn run(
             "Building {} target(s) with verbose output",
             targets.len()
         ));
-    } else if num_jobs == 1 || targets.len() == 1 {
-        output::header(&format!("Building {} target(s)", targets.len()));
-    } else if num_jobs >= targets.len() {
-        output::header(&format!("Building {} target(s)", targets.len()));
-    } else {
+    } else if num_jobs < targets.len() && num_jobs > 1 && targets.len() > 1 {
         output::header(&format!(
             "Building {} target(s) with {} parallel jobs",
             targets.len(),
             num_jobs
         ));
+    } else {
+        output::header(&format!("Building {} target(s)", targets.len()));
     }
 
     // 5. Run builds
