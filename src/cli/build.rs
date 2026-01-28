@@ -6,6 +6,7 @@ use crate::build::orchestrator::BuildOrchestrator;
 use crate::build::target::BuildTarget;
 use crate::config::build_yaml::BuildConfig;
 use crate::config::project::Project;
+use crate::config::west_yml;
 use crate::container::Runtime;
 use crate::output;
 use crate::paths;
@@ -24,7 +25,9 @@ pub fn run(
 ) -> Result<()> {
     // 1. Detect project structure
     let project = Project::detect()?;
-    output::status("Project", &paths::anonymize_path(&project.root));
+    let project_display = west_yml::format_project_display(&project.config_dir)
+        .unwrap_or_else(|_| paths::anonymize_path(&project.root));
+    output::status("Project", &project_display);
 
     // 2. Detect container runtime and ensure it's running
     let runtime = Runtime::detect()?;

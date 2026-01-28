@@ -93,3 +93,83 @@ pub fn hash_workspace_key(config_dir: &Path) -> Result<String> {
     // Return first 16 chars of hex
     Ok(hex::encode(&result[..8]))
 }
+
+/// Format git info as "project:branch" for display
+/// Extracts just the repo name from URLs like:
+/// - https://github.com/user/repo.git -> repo
+/// - git@github.com:user/repo.git -> repo
+/// - /path/to/local/repo -> repo
+pub fn format_project_display(config_dir: &Path) -> Result<String> {
+    let (repo_id, branch) = get_git_info(config_dir)?;
+
+    // Extract repo name from URL or path
+    let repo_name = extract_repo_name(&repo_id);
+
+    Ok(format!("{}:{}", repo_name, branch))
+}
+
+/// Extract repository name from a git URL or path
+fn extract_repo_name(repo_id: &str) -> String {
+    // Remove trailing .git if present
+    let cleaned = repo_id.trim_end_matches(".git");
+
+    // Try to extract from URL patterns
+    // https://github.com/user/repo or git@github.com:user/repo
+    if let Some(name) = cleaned.rsplit('/').next() {
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+
+    // Handle git@host:user/repo format
+    if let Some(name) = cleaned
+        .rsplit(':')
+        .next()
+        .and_then(|s| s.rsplit('/').next())
+    {
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+
+    // Fallback: use the whole string if we can't parse it
+    cleaned.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_repo_name_https() {
+        assert_eq!(
+            extract_repo_name("https://github.com/user/my-keyboard.git"),
+            "my-keyboard"
+        );
+        assert_eq!(
+            extract_repo_name("https://github.com/user/my-keyboard"),
+            "my-keyboard"
+        );
+    }
+
+    #[test]
+    fn test_extract_repo_name_ssh() {
+        assert_eq!(
+            extract_repo_name("git@github.com:user/my-keyboard.git"),
+            "my-keyboard"
+        );
+        assert_eq!(
+            extract_repo_name("git@github.com:user/my-keyboard"),
+            "my-keyboard"
+        );
+    }
+
+    #[test]
+    fn test_extract_repo_name_local_path() {
+        assert_eq!(
+            extract_repo_name("/Users/someone/projects/my-keyboard"),
+            "my-keyboard"
+        );
+        assert_eq!(extract_repo_name("/home/user/zmk-config"), "zmk-config");
+    }
+}
