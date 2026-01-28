@@ -1,5 +1,5 @@
 ### L(ocal) F(first) Z(MK builds)
-[normal](https://github.com/user-attachments/assets/4f39fc48-3006-4dc9-95bc-1233b39ab402)
+[normal](https://github.com/user-attachments/assets/ddf8eb61-a803-49c2-a857-c325f53dcc4d)
 #### Disclaimer 
 This is highly experimental and largly coded by claude.   
 Use at your own risk!  
@@ -32,7 +32,7 @@ lfz
 ```bash
 lfz -i
 ```
-[incremental](https://github.com/user-attachments/assets/df47f49e-7141-4aa5-8ab3-df630024ae77)
+[incremental](https://github.com/user-attachments/assets/ed9f15a1-4844-4002-a87c-7090ef5e5b98)
 
 ### Groups
 You can add a group to each target in the build.yml file.
@@ -74,14 +74,16 @@ lfz -g central
 ```
 
 
-[reset](https://github.com/user-attachments/assets/6e72389b-4bc7-4e52-9ae5-efe6714b3b4c)   
+[reset](https://github.com/user-attachments/assets/1b6a464b-f126-4c9a-87d1-2e9ac65cba8a)   
 
 
-[central](https://github.com/user-attachments/assets/7a7ed411-d8b5-4947-899d-bb8e1f943a14)
+[central](https://github.com/user-attachments/assets/c203e0e9-5979-4109-861b-fca16726bd39)
 
 Defaults to all groups.
 
+### Composition of build arguments
 
+[composition](https://github.com/user-attachments/assets/ddf27544-fa4d-4761-bb9e-9559b7362e3f)
 
 
 #### See all subcommands
