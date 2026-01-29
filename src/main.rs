@@ -9,6 +9,17 @@ mod workspace;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 
+/// Build mode determines whether to use pristine or incremental builds
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildMode {
+    /// Automatically decide based on config file changes (default)
+    Auto,
+    /// Force incremental build (fast, but may have stale artifacts)
+    Incremental,
+    /// Force pristine build (safe, always clean)
+    Pristine,
+}
+
 /// Build options shared between top-level and `build` subcommand
 #[derive(Args, Clone)]
 struct BuildArgs {
@@ -36,13 +47,30 @@ struct BuildArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Incremental build (faster, but may have stale artifacts)
-    #[arg(short, long)]
+    /// Incremental build (faster, but may have stale artifacts if configs changed)
+    #[arg(short, long, conflicts_with = "pristine")]
     incremental: bool,
+
+    /// Force pristine/clean build (safe, ignores cached build state)
+    #[arg(short, long, conflicts_with = "incremental")]
+    pristine: bool,
 
     /// Build only targets in this group (e.g., "central", "peripheral", or "all")
     #[arg(short, long, default_value = "all")]
     group: String,
+}
+
+impl BuildArgs {
+    /// Determine the build mode from CLI flags
+    fn build_mode(&self) -> BuildMode {
+        if self.incremental {
+            BuildMode::Incremental
+        } else if self.pristine {
+            BuildMode::Pristine
+        } else {
+            BuildMode::Auto
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -81,6 +109,7 @@ enum Commands {
 }
 
 fn run_build(args: BuildArgs) -> Result<()> {
+    let build_mode = args.build_mode();
     cli::build::run(
         args.board,
         args.shield,
@@ -88,7 +117,7 @@ fn run_build(args: BuildArgs) -> Result<()> {
         args.jobs,
         args.quiet,
         args.verbose,
-        args.incremental,
+        build_mode,
         args.group,
     )
 }

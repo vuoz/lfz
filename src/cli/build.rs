@@ -10,7 +10,8 @@ use crate::config::west_yml;
 use crate::container::Runtime;
 use crate::output;
 use crate::paths;
-use crate::workspace::WorkspaceManager;
+use crate::workspace::{is_incremental_safe, BuildHashes, WorkspaceManager};
+use crate::BuildMode;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -20,7 +21,7 @@ pub fn run(
     jobs: Option<usize>,
     quiet: bool,
     verbose: bool,
-    incremental: bool,
+    build_mode: BuildMode,
     group: String,
 ) -> Result<()> {
     // 1. Detect project structure
@@ -39,7 +40,24 @@ pub fn run(
     let workspace = workspace_manager.get_or_create(&project)?;
     output::status("Workspace", &paths::anonymize_path(&workspace));
 
-    // 4. Determine build targets
+    // 4. Calculate current config hashes and determine pristine mode
+    let west_yml_path = project.config_dir.join("west.yml");
+    let current_hashes = BuildHashes::calculate(&project.build_yaml, &west_yml_path)?;
+
+    let (pristine, mode_reason) = match build_mode {
+        BuildMode::Incremental => (false, "incremental (forced)"),
+        BuildMode::Pristine => (true, "pristine (forced)"),
+        BuildMode::Auto => {
+            if is_incremental_safe(&workspace, &current_hashes) {
+                (false, "incremental (configs unchanged)")
+            } else {
+                (true, "pristine (configs changed or first build)")
+            }
+        }
+    };
+    output::status("Build mode", mode_reason);
+
+    // 5. Determine build targets
     let targets = if let Some(board) = board {
         // Single target from CLI args (ignore group filter)
         vec![BuildTarget::from_args(board, shield)?]
@@ -86,12 +104,17 @@ pub fn run(
         output::header(&format!("Building {} target(s)", targets.len()));
     }
 
-    // 5. Run builds
+    // 6. Run builds
     let output_dir = PathBuf::from(&output_path);
-    // Pristine is the default (safe), incremental is opt-in (fast but may have stale artifacts)
-    let pristine = !incremental;
     let orchestrator = BuildOrchestrator::new(
-        runtime, workspace, project, output_dir, quiet, verbose, pristine,
+        runtime,
+        workspace.clone(),
+        project,
+        output_dir,
+        quiet,
+        verbose,
+        pristine,
+        current_hashes,
     );
 
     let build_start = Instant::now();

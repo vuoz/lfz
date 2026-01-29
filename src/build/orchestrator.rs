@@ -13,6 +13,7 @@ use crate::config::project::Project;
 use crate::container::{ContainerCommand, Runtime, DEFAULT_IMAGE};
 use crate::output::{self, BuildProgress, BuildState};
 use crate::paths;
+use crate::workspace::BuildHashes;
 
 /// Result of a single build
 #[derive(Debug, Default)]
@@ -33,9 +34,12 @@ pub struct BuildOrchestrator {
     quiet: bool,
     verbose: bool,
     pristine: bool,
+    /// Current build hashes to save after successful builds
+    build_hashes: BuildHashes,
 }
 
 impl BuildOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         runtime: Runtime,
         workspace: PathBuf,
@@ -44,6 +48,7 @@ impl BuildOrchestrator {
         quiet: bool,
         verbose: bool,
         pristine: bool,
+        build_hashes: BuildHashes,
     ) -> Self {
         Self {
             runtime,
@@ -53,6 +58,7 @@ impl BuildOrchestrator {
             quiet,
             verbose,
             pristine,
+            build_hashes,
         }
     }
 
@@ -68,6 +74,9 @@ impl BuildOrchestrator {
             };
             results.push(result);
         }
+
+        // Save hashes if all builds succeeded (enables incremental builds next time)
+        self.save_hashes_if_all_succeeded(&results);
 
         Ok(results)
     }
@@ -158,7 +167,21 @@ impl BuildOrchestrator {
             .into_inner()
             .unwrap();
 
+        // Save hashes if all builds succeeded (enables incremental builds next time)
+        self.save_hashes_if_all_succeeded(&results);
+
         Ok(results)
+    }
+
+    /// Save build hashes if all builds succeeded
+    fn save_hashes_if_all_succeeded(&self, results: &[BuildResult]) {
+        let all_succeeded = results.iter().all(|r| r.success);
+        if all_succeeded && !results.is_empty() {
+            if let Err(e) = self.build_hashes.save(&self.workspace) {
+                // Non-fatal: just means next build won't auto-detect incremental
+                output::warning(&format!("Failed to save build hashes: {}", e));
+            }
+        }
     }
 
     /// Build targets in parallel with verbose streaming output (colored prefixes)
