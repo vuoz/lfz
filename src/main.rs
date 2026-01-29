@@ -91,6 +91,13 @@ enum Commands {
     /// Build ZMK firmware (default if no subcommand given)
     Build(BuildArgs),
 
+    /// List available build targets and groups
+    List {
+        /// Filter targets by group
+        #[arg(short, long)]
+        group: Option<String>,
+    },
+
     /// Refresh west workspace (re-run west update)
     Update,
 
@@ -127,6 +134,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Build(args)) => run_build(args),
+        Some(Commands::List { group }) => cli::list::run(group),
         Some(Commands::Update) => cli::update::run(),
         Some(Commands::Clean { all }) => cli::clean::run(all),
         Some(Commands::Purge) => cli::purge::run(),
