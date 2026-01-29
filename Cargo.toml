@@ -19,11 +19,11 @@ serde_yaml = "0.9"
 
 # Error handling
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 
 # Paths and directories
-directories = "5"
-dirs = "5"
+directories = "6"
+dirs = "6"
 
 # Hashing (for cache keys)
 sha2 = "0.10"
@@ -36,8 +36,8 @@ rayon = "1.10"
 lazy_static = "1.4"
 
 # Terminal UI
-indicatif = "0.17"
-console = "0.15"
+indicatif = "0.18"
+console = "0.16"
 
 [dev-dependencies]
 tempfile = "3"
