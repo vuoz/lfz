@@ -42,7 +42,8 @@ pub fn run(
 
     // 4. Calculate current config hashes and determine pristine mode
     let west_yml_path = project.config_dir.join("west.yml");
-    let current_hashes = BuildHashes::calculate(&project.build_yaml, &west_yml_path)?;
+    let current_hashes =
+        BuildHashes::calculate(&project.root, &project.build_yaml, &west_yml_path)?;
 
     let (pristine, mode_reason) = match build_mode {
         BuildMode::Incremental => (false, "incremental (forced)"),
