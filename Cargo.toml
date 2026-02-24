@@ -1,6 +1,6 @@
 [package]
 name = "lfz"
-version = "0.1.0"
+version = "0.1.7"
 edition = "2021"
 description = "Local First ZMK - Build ZMK firmware locally with ease"
 license = "MIT"
