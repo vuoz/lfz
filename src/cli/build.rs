@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -59,6 +60,7 @@ pub fn run(
     output::status("Build mode", mode_reason);
 
     // 5. Determine build targets
+    let is_full_build = board.is_none() && group == "all";
     let targets = if let Some(board) = board {
         // Single target from CLI args (ignore group filter)
         vec![BuildTarget::from_args(board, shield)?]
@@ -105,8 +107,11 @@ pub fn run(
         output::header(&format!("Building {} target(s)", targets.len()));
     }
 
-    // 6. Run builds
+    // 6. Clean stale artifacts from output directory
     let output_dir = PathBuf::from(&output_path);
+    clean_output_dir(&output_dir, &targets, is_full_build);
+
+    // 7. Run builds
     let orchestrator = BuildOrchestrator::new(
         runtime,
         workspace.clone(),
@@ -161,4 +166,33 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// Clean stale artifacts from the output directory before building.
+/// - Full build: remove all .uf2 files (catches removed targets + branch switches)
+/// - Partial build: remove only the .uf2 files for targets being built
+fn clean_output_dir(output_dir: &PathBuf, targets: &[BuildTarget], full_build: bool) {
+    if !output_dir.exists() {
+        return;
+    }
+
+    if full_build {
+        // Remove all .uf2 files from the output directory
+        if let Ok(entries) = fs::read_dir(output_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("uf2") {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    } else {
+        // Remove only artifacts for targets being built
+        for target in targets {
+            let artifact = output_dir.join(format!("{}.uf2", target.artifact_name));
+            if artifact.exists() {
+                let _ = fs::remove_file(&artifact);
+            }
+        }
+    }
 }

@@ -155,8 +155,8 @@ shield:
         let config: BuildConfig = serde_yaml::from_str(yaml).unwrap();
         let targets = config.expand_targets().unwrap();
         assert_eq!(targets.len(), 2);
-        assert_eq!(targets[0].artifact_name, "corne_left-nice_nano_v2");
-        assert_eq!(targets[1].artifact_name, "corne_right-nice_nano_v2");
+        assert_eq!(targets[0].artifact_name, "corne_left-nice_nano_v2-zmk");
+        assert_eq!(targets[1].artifact_name, "corne_right-nice_nano_v2-zmk");
     }
 
     #[test]

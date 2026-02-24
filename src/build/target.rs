@@ -74,11 +74,21 @@ impl BuildTarget {
         })
     }
 
-    /// Generate artifact name from board and shield
+    /// Sanitize a board identifier for use in filesystem paths.
+    /// Replaces `//` (sysbuild domain qualifier) with `_` to avoid nested directories.
+    /// e.g. "xiao_ble//zmk" -> "xiao_ble_zmk"
+    fn sanitize_board(board: &str) -> String {
+        board.replace("//", "_")
+    }
+
+    /// Generate artifact name from board and shield.
+    /// Matches the ZMK GitHub Actions naming scheme:
+    ///   ${artifact_name:-${shield:+$shield-}${board//\//_}-zmk}
     fn generate_artifact_name(board: &str, shield: Option<&str>) -> String {
+        let sanitized = Self::sanitize_board(board);
         match shield {
-            Some(s) => format!("{}-{}", s, board),
-            None => board.to_string(),
+            Some(s) => format!("{}-{}-zmk", s, sanitized),
+            None => format!("{}-zmk", sanitized),
         }
     }
 
@@ -125,15 +135,41 @@ impl BuildTarget {
         args
     }
 
-    /// Get the path to the output firmware file (relative to workspace root)
-    pub fn firmware_path(&self) -> String {
-        format!("{}/zephyr/zmk.uf2", self.build_dir)
+    /// Get candidate paths for the output firmware file (relative to workspace root).
+    /// Returns paths in priority order:
+    ///   1. {build_dir}/zephyr/zmk.uf2  - standard or merged sysbuild output
+    ///   2. {build_dir}/zmk/zephyr/zmk.uf2  - sysbuild zmk domain output
+    pub fn firmware_path_candidates(&self) -> Vec<String> {
+        vec![
+            format!("{}/zephyr/zmk.uf2", self.build_dir),
+            format!("{}/zmk/zephyr/zmk.uf2", self.build_dir),
+        ]
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_board_no_slashes() {
+        assert_eq!(BuildTarget::sanitize_board("nice_nano_v2"), "nice_nano_v2");
+    }
+
+    #[test]
+    fn test_sanitize_board_single_slash_preserved() {
+        // Single / (SoC qualifier) is preserved as-is
+        assert_eq!(
+            BuildTarget::sanitize_board("xiao_ble/nrf52840"),
+            "xiao_ble/nrf52840"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_board_double_slash() {
+        // // (sysbuild qualifier) is replaced with _
+        assert_eq!(BuildTarget::sanitize_board("xiao_ble//zmk"), "xiao_ble_zmk");
+    }
 
     #[test]
     fn test_from_args_with_shield() {
@@ -143,8 +179,8 @@ mod tests {
 
         assert_eq!(target.board, "nice_nano_v2");
         assert_eq!(target.shield, Some("corne_left".to_string()));
-        assert_eq!(target.artifact_name, "corne_left-nice_nano_v2");
-        assert_eq!(target.build_dir, "build/corne_left-nice_nano_v2");
+        assert_eq!(target.artifact_name, "corne_left-nice_nano_v2-zmk");
+        assert_eq!(target.build_dir, "build/corne_left-nice_nano_v2-zmk");
     }
 
     #[test]
@@ -153,7 +189,55 @@ mod tests {
 
         assert_eq!(target.board, "nice60");
         assert_eq!(target.shield, None);
-        assert_eq!(target.artifact_name, "nice60");
+        assert_eq!(target.artifact_name, "nice60-zmk");
+    }
+
+    #[test]
+    fn test_from_args_hwmv2_board_with_shield() {
+        let target =
+            BuildTarget::from_args("xiao_ble//zmk".to_string(), Some("chalk_left".to_string()))
+                .unwrap();
+
+        assert_eq!(target.board, "xiao_ble//zmk"); // Original preserved for -b flag
+        assert_eq!(target.artifact_name, "chalk_left-xiao_ble_zmk-zmk");
+        assert_eq!(target.build_dir, "build/chalk_left-xiao_ble_zmk-zmk");
+    }
+
+    #[test]
+    fn test_from_args_hwmv2_board_without_shield() {
+        let target = BuildTarget::from_args("xiao_ble//zmk".to_string(), None).unwrap();
+
+        assert_eq!(target.board, "xiao_ble//zmk");
+        assert_eq!(target.artifact_name, "xiao_ble_zmk-zmk");
+    }
+
+    #[test]
+    fn test_from_include_custom_artifact_name_preserved() {
+        let include = BuildInclude {
+            board: "xiao_ble//zmk".to_string(),
+            shield: Some("chalk_left".to_string()),
+            cmake_args: None,
+            snippet: None,
+            artifact_name: Some("my_custom_name".to_string()),
+            group: None,
+        };
+
+        let target = BuildTarget::from_include(&include).unwrap();
+        assert_eq!(target.artifact_name, "my_custom_name");
+    }
+
+    #[test]
+    fn test_west_build_args_uses_original_board() {
+        let target =
+            BuildTarget::from_args("xiao_ble//zmk".to_string(), Some("chalk_left".to_string()))
+                .unwrap();
+
+        let args = target.west_build_args("/workspace/config", false);
+
+        // -b flag must use the original board name (with //)
+        assert!(args.contains(&"xiao_ble//zmk".to_string()));
+        // build dir must be sanitized (no //)
+        assert!(args.contains(&"build/chalk_left-xiao_ble_zmk-zmk".to_string()));
     }
 
     #[test]
@@ -171,7 +255,7 @@ mod tests {
         assert!(args.contains(&"nice_nano_v2".to_string()));
         assert!(args.contains(&"-DSHIELD=corne_left".to_string()));
         assert!(args.iter().any(|a| a.contains("-DZMK_CONFIG=")));
-        assert!(!args.contains(&"-p".to_string())); // No pristine flag for incremental
+        assert!(!args.contains(&"-p".to_string()));
     }
 
     #[test]
@@ -182,7 +266,7 @@ mod tests {
 
         let args = target.west_build_args("/workspace/config", true);
 
-        assert!(args.contains(&"-p".to_string())); // Pristine flag present
+        assert!(args.contains(&"-p".to_string()));
     }
 
     #[test]
@@ -208,7 +292,6 @@ mod tests {
             .map(|(i, _)| i)
             .collect();
 
-        // All -S flags should be before --
         for pos in &s_positions {
             assert!(
                 *pos < separator_pos,
@@ -216,7 +299,6 @@ mod tests {
             );
         }
 
-        // Should have two snippets
         assert_eq!(s_positions.len(), 2);
         assert!(args.contains(&"studio-rpc-usb-uart".to_string()));
         assert!(args.contains(&"zmk-usb-logging".to_string()));
@@ -239,5 +321,23 @@ mod tests {
         assert!(target
             .cmake_args
             .contains(&"-DCONFIG_ZMK_SPLIT=y".to_string()));
+    }
+
+    #[test]
+    fn test_firmware_path_candidates() {
+        let target =
+            BuildTarget::from_args("xiao_ble//zmk".to_string(), Some("chalk_left".to_string()))
+                .unwrap();
+
+        let candidates = target.firmware_path_candidates();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates[0],
+            "build/chalk_left-xiao_ble_zmk-zmk/zephyr/zmk.uf2"
+        );
+        assert_eq!(
+            candidates[1],
+            "build/chalk_left-xiao_ble_zmk-zmk/zmk/zephyr/zmk.uf2"
+        );
     }
 }
